@@ -31,9 +31,9 @@ jobs:
     - name: Build project
       run: |
         # Build the `version` crate first so its cdylib is available for the main crate's build script
-        cargo +nightly build -p version --release
+        cargo +nightly build --release -p version --target=x86_64-pc-windows-msvc
         # Then build the whole workspace
-        cargo +nightly build --release
+        cargo +nightly-i686-pc-windows-msvc build --release -p huawei-pc-manager-bootstrap-core -p huawei-pc-manager-bootstrap --target=i686-pc-windows-msvc
 
     - name: Upload build artifact
       uses: actions/upload-artifact@v4
