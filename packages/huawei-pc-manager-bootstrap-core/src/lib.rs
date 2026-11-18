@@ -25,6 +25,18 @@ pub unsafe extern "system" fn enable_hook(opts_ptr: *const INJECT_OPTIONS_WRAPPE
         .or_else(|| initialize_file_logger().ok());
 
     info!("Enabling hook ...");
+
+    // Pin this module before installing any hook: the injector's
+    // InjectionGuard calls FreeLibrary on the injected core DLL right after
+    // this export returns, but our inline detours (retour::static_detour)
+    // point into this DLL's code section. Without pinning, the first
+    // GetSystemFirmwareTable call would jump into freed memory and crash the
+    // installer with 0xc0000005.
+    let self_address = enable_hook as *const () as *const core::ffi::c_void;
+    if let Err(err) = common::common::pin_module(self_address) {
+        error!("Failed to pin module: {}", err);
+    }
+
     if let Err(err) = common::common::enable_hook(opts) {
         error!("{}", err);
     }
