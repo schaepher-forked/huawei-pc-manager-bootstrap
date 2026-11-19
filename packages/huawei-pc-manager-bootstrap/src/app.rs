@@ -11,9 +11,10 @@ use common::config::{
     get_config_dir, get_config_file_path, get_log_path, save_firmware_config, Config,
 };
 use iced::futures::SinkExt;
+use iced::widget::qr_code::QRCode;
 use iced::widget::scrollable::{Direction, Properties};
 use iced::widget::{container, row, scrollable, text_input};
-use iced::{executor, Application, Length, Theme};
+use iced::{executor, Application, Font, Length, Theme};
 use iced::{
     widget::{button, column, text},
     Element,
@@ -31,6 +32,7 @@ use widestring::WideCStr;
 use windows_sys::Win32::UI::Shell::{SHGetSpecialFolderPathW, CSIDL_PROGRAM_FILES};
 
 use crate::logger::CustomLayer;
+use crate::nfc;
 use crate::version::SetupVersion;
 
 #[derive(Debug, Clone)]
@@ -40,6 +42,9 @@ pub enum Message {
     BrowserSetup,
     Install,
     InstallPatch,
+    ShowNfcTag,
+    RefreshNfcTag,
+    CloseNfcTag,
     TerminateAllProcesses,
     OpenConfigFile,
     OpenLogFile,
@@ -67,6 +72,8 @@ pub(crate) struct BootstrapApp {
     status_text: String,
     log_text: String,
     ipc_logger_address: Option<String>,
+    nfc_tag: Option<nfc::NfcTag>,
+    nfc_error: Option<String>,
 }
 
 impl Application for BootstrapApp {
@@ -134,6 +141,11 @@ impl Application for BootstrapApp {
                     info!("Patch installed successfully");
                 }
             }
+            Message::ShowNfcTag | Message::RefreshNfcTag => self.refresh_nfc_tag(),
+            Message::CloseNfcTag => {
+                self.nfc_tag = None;
+                self.nfc_error = None;
+            }
             Message::TerminateAllProcesses => {
                 if let Err(err) = Self::terminate_all_processes() {
                     self.status_text = format!("Failed to kill all processes: {}", err);
@@ -171,6 +183,7 @@ impl Application for BootstrapApp {
             button("浏览").on_press(Message::BrowserSetup),
             button("安装").on_press(Message::Install),
             button("安装补丁").on_press(Message::InstallPatch),
+            button("碰一碰标签").on_press(Message::ShowNfcTag),
             button("终止所有进程").on_press(Message::TerminateAllProcesses),
             button("打开配置").on_press(Message::OpenConfigFile),
             button("打开日志").on_press(Message::OpenLogFile),
@@ -178,24 +191,29 @@ impl Application for BootstrapApp {
         ]
         .spacing(8);
 
-        container(
-            column![
-                text("安装包位置"),
-                text_input("", &self.executable_file_path).on_input(Message::ChangeSetupFilePath),
-                toolbar,
-                text(&self.status_text),
-                scrollable(text(&self.log_text))
-                    .width(Length::Fill)
-                    .height(Length::Fill)
-                    .direction(Direction::Vertical(
-                        Properties::default().alignment(scrollable::Alignment::End),
-                    ))
-            ]
-            .padding(8)
-            .spacing(8),
-        )
-        .padding(4)
-        .into()
+        let mut content = column![
+            text("安装包位置"),
+            text_input("", &self.executable_file_path).on_input(Message::ChangeSetupFilePath),
+            toolbar,
+            text(&self.status_text),
+        ]
+        .padding(8)
+        .spacing(8);
+
+        if let Some(panel) = self.nfc_panel() {
+            content = content.push(panel);
+        }
+
+        content = content.push(
+            scrollable(text(&self.log_text))
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .direction(Direction::Vertical(
+                    Properties::default().alignment(scrollable::Alignment::End),
+                )),
+        );
+
+        container(content).padding(4).into()
     }
 
     fn subscription(&self) -> iced::Subscription<Self::Message> {
@@ -221,6 +239,71 @@ const TIPS_AUTO_SCAN_FOUND: &str = "已找到安装包，点击“安装”按�
 const TIPS_AUTO_SCAN_NOT_FOUND: &str = "未找到安装包！";
 
 impl BootstrapApp {
+    fn refresh_nfc_tag(&mut self) {
+        match nfc::NfcTag::generate() {
+            Ok(tag) => {
+                info!("NFC tag payload: {}", tag.payload);
+                self.nfc_error = None;
+                self.nfc_tag = Some(tag);
+            }
+            Err(err) => {
+                warn!("Generate NFC tag failed: {}", err);
+                self.nfc_error = Some(format!("{}", err));
+            }
+        }
+    }
+
+    fn nfc_panel(&self) -> Option<Element<'_, Message>> {
+        if let Some(tag) = &self.nfc_tag {
+            let qr = QRCode::new(&tag.qr).cell_size(5);
+
+            let mut details = column![
+                text("标签内容（用手机「一碰传助手」扫码写入 NFC 标签）"),
+                text(&tag.payload).font(Font::MONOSPACE),
+                text(format!("SN：{}", tag.sn)),
+                text(format!("MAC：{}", tag.mac)),
+                text(format!("MODELID：{}（电脑）", nfc::PC_MODEL_ID)),
+                text("SN 取自补丁配置，与电脑管家看到的保持一致；若不一致请先安装补丁或修改配置。"),
+                row![
+                    button("重新读取").on_press(Message::RefreshNfcTag),
+                    button("关闭").on_press(Message::CloseNfcTag),
+                ]
+                .spacing(8),
+            ]
+            .spacing(6)
+            .width(Length::Fill);
+
+            if let Some(err) = &self.nfc_error {
+                details = details.push(text(format!("上次读取失败：{}", err)));
+            }
+
+            Some(
+                container(row![qr, details].spacing(16).width(Length::Fill))
+                    .padding(12)
+                    .into(),
+            )
+        } else if let Some(err) = &self.nfc_error {
+            Some(
+                container(
+                    column![
+                        text("碰一碰 NFC 标签"),
+                        text(format!("生成失败：{}", err)),
+                        row![
+                            button("重试").on_press(Message::RefreshNfcTag),
+                            button("关闭").on_press(Message::CloseNfcTag),
+                        ]
+                        .spacing(8),
+                    ]
+                    .spacing(6),
+                )
+                .padding(12)
+                .into(),
+            )
+        } else {
+            None
+        }
+    }
+
     pub(crate) fn new_default_config() -> anyhow::Result<Self> {
         let log_file_path = get_log_path()?
             .to_str()
@@ -235,6 +318,8 @@ impl BootstrapApp {
             status_text,
             log_text,
             ipc_logger_address: None,
+            nfc_tag: None,
+            nfc_error: None,
             log_receiver: RefCell::new(Some(rx)),
             log_sender: tx,
         })
@@ -250,6 +335,8 @@ impl BootstrapApp {
             status_text,
             log_text,
             ipc_logger_address: None,
+            nfc_tag: None,
+            nfc_error: None,
             log_receiver: RefCell::new(Some(rx)),
             log_sender: tx,
         }

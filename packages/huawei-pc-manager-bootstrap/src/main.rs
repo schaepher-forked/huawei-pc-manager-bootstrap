@@ -15,6 +15,7 @@ use windows_sys::Win32::UI::Shell::{IsUserAnAdmin, ShellExecuteW};
 
 mod app;
 mod logger;
+mod nfc;
 mod version;
 
 #[derive(Parser, Debug)]
