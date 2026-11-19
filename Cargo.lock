@@ -576,7 +576,7 @@ checksum = "bf43edc576402991846b093a7ca18a3477e0ef9c588cde84964b5d3e43016642"
 
 [[package]]
 name = "common"
-version = "0.1.9"
+version = "1.0.0"
 dependencies = [
  "anyhow",
  "bincode",
@@ -1315,7 +1315,7 @@ checksum = "dfa686283ad6dd069f105e5ab091b04c62850d3e4cf5d67debad1933f55023df"
 
 [[package]]
 name = "huawei-pc-manager-bootstrap"
-version = "0.1.9"
+version = "1.0.0"
 dependencies = [
  "anyhow",
  "backtrace",
@@ -1341,7 +1341,7 @@ dependencies = [
 
 [[package]]
 name = "huawei-pc-manager-bootstrap-core"
-version = "0.1.9"
+version = "1.0.0"
 dependencies = [
  "anyhow",
  "bincode",
@@ -3481,7 +3481,7 @@ checksum = "f1bddf1187be692e79c5ffeab891132dfb0f236ed36a43c7ed39f1165ee20191"
 
 [[package]]
 name = "version"
-version = "0.1.9"
+version = "1.0.0"
 dependencies = [
  "anyhow",
  "chrono",
