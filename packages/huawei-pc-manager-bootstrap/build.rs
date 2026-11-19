@@ -85,6 +85,7 @@ fn main() {
     }
 
     if let Some(candidate) = found {
+        println!("cargo:rerun-if-changed={}", candidate.display());
         let dst = out_dir.join(candidate.file_name().unwrap());
         if let Err(e) = fs::copy(&candidate, &dst) {
             println!("cargo:warning=Failed to copy cdylib from {:?} to {:?}: {}", candidate, dst, e);

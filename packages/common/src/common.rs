@@ -541,6 +541,9 @@ pub fn enable_hook(opts: Option<InjectOptions>) -> anyhow::Result<()> {
         }
     }
 
+    info!("wlan_fix: installing WlanQueryInterface hook");
+    crate::wlan_fix::install_async();
+
     Ok(())
 }
 
