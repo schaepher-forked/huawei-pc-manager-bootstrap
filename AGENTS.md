@@ -4,10 +4,11 @@
 
 华为电脑管家安装包启动器（Rust workspace），让非华为电脑可以安装并正常使用 PC Manager：
 
-- `packages/huawei-pc-manager-bootstrap`：i686 GUI 安装器，`include_bytes!` 内嵌补丁 DLL
+- `packages/huawei-pc-manager-bootstrap`：i686 GUI 安装器，`include_bytes!` 内嵌补丁 DLL；
+  `src/nfc.rs` 生成「碰一碰」NFC 标签载荷与二维码
 - `packages/huawei-pc-manager-bootstrap-core`：i686 注入 DLL
 - `packages/version`：x86_64 劫持 `version.dll`（转发全部导出 + 挂钩 `GetSystemFirmwareTable`）
-- `packages/common`：SMBIOS 伪造、进程注入等公共逻辑
+- `packages/common`：SMBIOS 伪造、进程注入、`wlan_fix.rs`（WlanQueryInterface 修复）等公共逻辑
 
 ## 构建
 
@@ -32,6 +33,28 @@
   `injectors` 的 `InjectionGuard` 在注入后立即 `FreeLibrary`，而 detour 代码就在该 DLL 里；
   不 pin 会在新版安装包首次调用 `GetSystemFirmwareTable` 时跳进已释放内存，崩溃 `0xc0000005`（上游 PR #54）。
 - 不要提交安装包 exe、`dist/`、`target/`。
+
+## Wi-Fi 协同补丁（wlan_fix）
+
+- `common::enable_hook` 末尾调用 `wlan_fix::install_async()`；只在 `HiConnectivityService.exe`
+  里安装 hook，避免把 `wlanapi.dll` 强加载进所有 PCManager 进程。
+- hook 安装必须在独立线程里做：`version.dll` 的安装逻辑跑在 `DllMain`，直接 `LoadLibrary`
+  会因 loader lock 死锁。
+- `WlanQueryInterface` 的 GUID 参数用 `WlanEnumInterfaces` 运行时取得的第一块物理网卡 GUID
+  全量替换（坏 GUID 是未初始化内存，不是虚拟网卡；`op=4` radio_state 是协同必需）。
+- 细节、部署与验证步骤见 [docs/wlan-fix.md](./docs/wlan-fix.md)。
+
+## 一碰传 NFC 标签
+
+- 载荷格式固定为 `SN=<16>|MAC=<12>|MODELID=00000506`，格式规则与
+  [Thirdparty-huawei-Share-OneHop](https://github.com/Masterchiefm/Thirdparty-huawei-Share-OneHop)
+  / [NFCSHARE-Honor-Edition](https://github.com/difaandailisi/NFCSHARE-Honor-Edition) 一致。
+- SN 必须使用补丁配置里的 SN（`Config::sn`），不能用真实 BIOS SN，否则电脑管家匹配不上。
+- 蓝牙 MAC 用 `BluetoothGetRadioInfo` 读取（`Win32_Devices_Bluetooth` feature），
+  结果按 `{:012X}` 输出，不要反转字节。
+- 二维码用 iced 的 `qr_code` feature（底层 `qrcode` crate），只出图不写 NFC。
+- `Cargo.lock` 固定了 `web-sys 0.3.72` + `wasm-bindgen-futures 0.4.45`：
+  新版 web-sys 删了 `GpuImageCopyBuffer` feature，会让 wgpu 0.16 依赖解析失败（见 Build.md）。
 
 ## 验证
 

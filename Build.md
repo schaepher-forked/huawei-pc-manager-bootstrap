@@ -136,6 +136,11 @@ XWIN_ARCH=x86 cargo xwin build --release \
 rm 'packages/version/C:\Windows\system32\version.dll'
 ```
 
+注意：`version.dll` 更新后如果怀疑 GUI 里内嵌的还是旧文件，检查 `out/version.dll` 的大小；
+build.rs 已对找到的 DLL 输出 `cargo:rerun-if-changed`，正常会重跑。必要时删掉
+`target/i686-pc-windows-msvc/release/build/huawei-pc-manager-bootstrap-*/out/version.dll`
+或 `touch packages/huawei-pc-manager-bootstrap/build.rs` 强制重跑。
+
 关于 `XWIN_ARCH`：
 
 - `cargo-xwin` 的缓存按架构放（`~/.cache/cargo-xwin/xwin/{crt,sdk}/lib/{x86,x86_64}`）。
@@ -154,6 +159,37 @@ cp target/i686-pc-windows-msvc/release/huawei-pc-manager-bootstrap.exe dist/
 ```
 
 `target/` 和 `dist/` 都在 `.gitignore` 中。
+
+### 7. 新增依赖时的解析坑（web-sys / wgpu）
+
+只要改动依赖（哪怕只是打开 iced 的某个 feature），cargo 就会重新解析整张依赖图。
+此时 `wgpu 0.16` 依赖的 `web-sys` feature `GpuImageCopyBuffer` 在 `web-sys >= 0.3.73`
+中已被删除，会直接报：
+
+```
+error: failed to select a version for `web-sys`.
+the package `wgpu` depends on `web-sys`, with features: `GpuImageCopyBuffer`
+but `web-sys` does not have these features.
+```
+
+`Cargo.lock` 已把 wasm 相关依赖固定为可用组合：
+
+```sh
+cargo update -p wasm-bindgen-futures --precise 0.4.45   # 连带 web-sys 0.3.72
+```
+
+不要单独升级 `web-sys` / `wasm-bindgen-futures`，否则 `iced_wgpu 0.11`（wgpu 0.16）会解析失败。
+
+### 8. 编译测试
+
+`build.rs` 按 profile 在 `target/<profile>` 下找 `version.dll`：
+
+- release：`cargo xwin check --release --tests -p huawei-pc-manager-bootstrap --target=i686-pc-windows-msvc`
+- debug：需先 `cp target/release/version.dll target/debug/`，
+  否则报 `CARGO_CDYLIB_FILE_VERSION_version not defined`
+
+交叉编译出来的测试二进制不能在 Linux 上运行；纯逻辑用例（SN/MAC 归一化）需在 Windows 上
+`cargo test` 跑，或在 Linux 上把纯函数单独抽出来跑（本项目已用等价副本验证过 3 个用例）。
 
 ## 三、产物验证
 

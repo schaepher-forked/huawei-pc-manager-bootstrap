@@ -18,6 +18,21 @@
 
 点击“安装”按钮，安装器将启动安装包程序。**注意，安装过程中，安装器将会自动检测华为电脑管家的主程序是否已经安装完毕（即 `C:\Program Files\Huawei\PCManager\PCManager.exe` 该文件已经存在）。如果检测到该文件，则会自动释放补丁文件 `version.dll` 到该目录。**
 
+## 碰一碰 NFC 标签
+
+安装并安装补丁之后，点击启动器上的「碰一碰标签」，会展示一张二维码：
+
+- 二维码内容：`SN=<16位SN>|MAC=<12位蓝牙MAC>|MODELID=00000506`
+- SN 取自补丁配置（即电脑管家读取到的 SN），空格会转成 `A`，右补 `A` 到 16 位，超长截断
+- MAC 是本机蓝牙适配器的 BD_ADDR，大写且不带分隔符
+
+用手机上的「一碰传助手」（`com.huawei.touchshare` / `com.hihonor.touchshare`）扫描二维码，
+把内容写入 NFC 标签（建议 NTAG213/215/216），贴到电脑上即可碰一碰连接。
+
+本工具只负责「算数据 + 出二维码」，不直接写 NFC；写标签由手机 App 完成。
+载荷格式与流程参考 [Thirdparty-huawei-Share-OneHop](https://github.com/Masterchiefm/Thirdparty-huawei-Share-OneHop)
+和 [NFCSHARE-Honor-Edition](https://github.com/difaandailisi/NFCSHARE-Honor-Edition)。
+
 ## 从源码构建
 
 输入以下命令，所有命令都成功之后，会在项目下建立 `dist` 目录，保存构建成功的文件。
