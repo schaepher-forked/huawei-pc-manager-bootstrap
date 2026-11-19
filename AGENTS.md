@@ -56,6 +56,13 @@
 - `Cargo.lock` 固定了 `web-sys 0.3.72` + `wasm-bindgen-futures 0.4.45`：
   新版 web-sys 删了 `GpuImageCopyBuffer` feature，会让 wgpu 0.16 依赖解析失败（见 Build.md）。
 
+## CI / Release
+
+- `.github/workflows/rust.yml`：windows-latest，固定 `nightly-2025-01-15`，
+  push main 滚动更新 `latest` release，push `v*` 发正式 release，PR / 手动只构建。
+- CI 构建顺序与本地一致：version x64 → 复制到 `target/release` → core / exe i686；
+  额外跑 i686 单测、校验 PE 架构和 `version.dll` 是否内嵌。
+
 ## 验证
 
 - `file dist/*` 检查架构。

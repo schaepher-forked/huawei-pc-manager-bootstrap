@@ -1,42 +1,160 @@
-name: Build Huawei PC Manager Bootstrap
+name: Build and Release
 
 on:
   push:
     branches: [ main ]
+    tags: [ 'v*' ]
   pull_request:
     branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
+env:
+  # 仓库里的 rust-toolchain 是浮动 nightly，最新 nightly 会把 std::intrinsics 当硬错误。
+  RUST_TOOLCHAIN: nightly-2025-01-15
 
 jobs:
   build:
+    name: Build (windows)
     runs-on: windows-latest
-
+    timeout-minutes: 45
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v3
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
-    - name: Install Rust
-      uses: actions-rs/toolchain@v1
-      with:
-        toolchain: nightly
-        override: true
+      - name: Install Rust toolchain and targets
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+          targets: x86_64-pc-windows-msvc, i686-pc-windows-msvc
 
-    - name: Cache cargo registry
-      uses: actions/cache@v3
-      with:
-        path: |
-          ~/.cargo/registry
-          ~/.cargo/git
-        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+      - name: Cache cargo and target
+        uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
 
-    - name: Build project
-      run: |
-        # Build the `version` crate first so its cdylib is available for the main crate's build script
-        cargo +nightly build --release -p version --target=x86_64-pc-windows-msvc
-        # Then build the whole workspace
-        cargo +nightly-i686-pc-windows-msvc build --release -p huawei-pc-manager-bootstrap-core -p huawei-pc-manager-bootstrap --target=i686-pc-windows-msvc
+      - name: Build x64 patch DLL, x86 core and launcher
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo +$RUST_TOOLCHAIN build --locked --release -p version --target x86_64-pc-windows-msvc
 
-    - name: Upload build artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: huawei-pc-manager-bootstrap
-        path: target/release/huawei-pc-manager-bootstrap.exe
+          # bootstrap 的 build.rs 在 target/<profile> 下找 version.dll，供 include_bytes! 内嵌
+          mkdir -p target/release dist
+          cp target/x86_64-pc-windows-msvc/release/version.dll target/release/version.dll
+
+          cargo +$RUST_TOOLCHAIN build --locked --release \
+            -p huawei-pc-manager-bootstrap-core \
+            -p huawei-pc-manager-bootstrap \
+            --target i686-pc-windows-msvc
+
+          cp target/x86_64-pc-windows-msvc/release/version.dll dist/version.dll
+          cp target/i686-pc-windows-msvc/release/huawei_pc_manager_bootstrap_core.dll dist/
+          cp target/i686-pc-windows-msvc/release/huawei-pc-manager-bootstrap.exe dist/
+
+      - name: Run unit tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo +$RUST_TOOLCHAIN test --locked --release -p huawei-pc-manager-bootstrap --target i686-pc-windows-msvc
+
+      - name: Verify architectures and embedded patch
+        shell: bash
+        run: |
+          node - <<'NODE'
+          const fs = require('fs');
+
+          function machine(path) {
+            const bytes = fs.readFileSync(path);
+            const pe = bytes.readInt32LE(0x3c);
+            if (bytes.readUInt32LE(pe) !== 0x4550) throw new Error(`invalid PE: ${path}`);
+            return bytes.readUInt16LE(pe + 4);
+          }
+
+          const expected = {
+            'dist/version.dll': 0x8664,
+            'dist/huawei-pc-manager-bootstrap.exe': 0x14c,
+            'dist/huawei_pc_manager_bootstrap_core.dll': 0x14c,
+          };
+          for (const [path, want] of Object.entries(expected)) {
+            const got = machine(path);
+            if (got !== want) {
+              throw new Error(`${path}: machine 0x${got.toString(16)} != 0x${want.toString(16)}`);
+            }
+            console.log(`${path}: 0x${got.toString(16)} OK`);
+          }
+
+          const dll = fs.readFileSync('dist/version.dll');
+          const exe = fs.readFileSync('dist/huawei-pc-manager-bootstrap.exe');
+          if (!exe.includes(dll)) throw new Error('version.dll is not embedded in the launcher');
+          console.log('embedded version.dll: OK');
+          NODE
+
+      - name: Generate checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd dist
+          sha256sum version.dll huawei_pc_manager_bootstrap_core.dll huawei-pc-manager-bootstrap.exe > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: huawei-pc-manager-bootstrap-windows
+          path: dist/*
+          if-no-files-found: error
+
+  release:
+    name: Publish release
+    # PR / workflow_dispatch 只构建；main 滚动更新 latest，v* 标签发正式版
+    if: >-
+      github.event_name == 'push' &&
+      (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Download build artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: huawei-pc-manager-bootstrap-windows
+          path: dist
+
+      - name: Publish rolling release (main)
+        if: github.ref == 'refs/heads/main'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest
+          name: Latest build (main)
+          body: |
+            由 main 分支 CI 自动构建，资产会随 main 更新。
+
+            - commit: `${{ github.sha }}`
+            - 运行记录: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          prerelease: false
+          make_latest: false
+          files: dist/*
+          overwrite_files: true
+          fail_on_unmatched_files: true
+
+      - name: Publish versioned release (tag)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
+          generate_release_notes: true
+          files: dist/*
+          overwrite_files: true
+          fail_on_unmatched_files: true

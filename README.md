@@ -2,6 +2,18 @@
 
 该仓库用以解决华为电脑管家 V12 无法在非华为电脑上安装的问题。
 
+## 自动构建与发布
+
+GitHub Actions（`.github/workflows/rust.yml`）在 Windows runner 上使用固定工具链
+`nightly-2025-01-15` 构建：
+
+- push 到 `main`：构建并滚动更新 [latest release](https://github.com/schaepher-forked/huawei-pc-manager-bootstrap/releases/tag/latest)（资产随 main 更新）
+- push `v*` 标签：生成对应版本的正式 release
+- PR / 手动触发：只构建，不发布
+
+每次发布的资产：`version.dll`（x64）、`huawei_pc_manager_bootstrap_core.dll`（x86）、
+`huawei-pc-manager-bootstrap.exe`（x86）和 `SHA256SUMS.txt`。
+
 ## 使用方式
 
 下载最新版本的安装器：<https://github.com/hamflx/huawei-pc-manager-bootstrap/releases>。
